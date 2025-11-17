@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CodeSnippets xmlns="http://schemas.microsoft.com/VisualStudio/2005/CodeSnippet">
+	<CodeSnippet Format="1.0.0">
+		<Header>
+			<Title>#my_functions</Title>
+			<Shortcut>#my_functions</Shortcut>
+			<Description>functions 语句的代码片段</Description>
+			<Author>Microsoft Corporation</Author>
+			<SnippetTypes>
+        <SnippetType>Expansion</SnippetType>
+        <SnippetType>SurroundsWith</SnippetType>
+      </SnippetTypes>
+		</Header>
+		<Snippet>
+			<Declarations>
+				<Literal>
+					<ID>expression</ID>
+					<ToolTip>作为 cpp 计算的函数</ToolTip>
+					<Default>true</Default>
+				</Literal>
+				<Literal Editable="false" >
+					<ID>cases</ID>
+					<Function>GenerateSwitchCases($expression$)</Function>
+					<Default><![CDATA[default:
+	break;]]></Default>
+				</Literal>
+			</Declarations>
+			<Code Language="cpp">
+        <![CDATA[int my_popcount(unsigned x) { //统计二进制中 1 的数量	popcount()
+	int count = 0;
+	while (x) {
+		x &= x - 1; // 清除最低位的1
+		count++;
+	}
+	return count;
+}
+
+int my_lg(unsigned x) { //计算最高位位置	_lg()  统计二进制有多少位
+	if (x == 0) return -1; // 未定义
+	int pos = 0;
+	while (x >>= 1) {
+		pos++;
+	}
+	return pos;
+  $selected$$end$
+}
+        
+        //$selected$$end$
+        
+       
+  ]]>
+			</Code>
+		</Snippet>
+	</CodeSnippet>
+</CodeSnippets>
