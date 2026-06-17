@@ -232,126 +232,122 @@
 
   // ---- Web Audio API 回退 ----
   let audioCtx = null;
-  let droneNodes = null;
+  let fallbackNodes = null;
   let chimeTimer = null;
-
-  function initFallbackAudio() {
-    if (audioCtx) return;
-    try {
-      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    } catch (e) {
-      console.warn('Web Audio API not supported');
-    }
-  }
 
   function startFallbackMusic() {
     if (isMusicPlaying) return;
-    initFallbackAudio();
+    // 首次创建 AudioContext（必须在用户手势中）
     if (!audioCtx) {
-      hint.textContent = '浏览器不支持 Web Audio API';
-      return;
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      } catch (e) {
+        hint.textContent = '浏览器不支持 Web Audio API';
+        return;
+      }
     }
-    // 确保 AudioContext 处于运行状态
-    if (audioCtx.state === 'suspended') {
-      audioCtx.resume().catch(function(){});
-    }
-    isMusicPlaying = true;
+    // 确保 AudioContext 运行
+    const doResume = audioCtx.state === 'suspended'
+      ? audioCtx.resume() : Promise.resolve();
+    doResume.catch(function(){}).then(function() {
+      if (isMusicPlaying) return;
+      isMusicPlaying = true;
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
 
-    const now = audioCtx.currentTime;
-    const droneGain = audioCtx.createGain();
-    droneGain.gain.value = 0.12;
-    droneGain.connect(audioCtx.destination);
+      // ── master gain ──
+      const master = audioCtx.createGain();
+      master.gain.value = 0.20;
+      master.connect(audioCtx.destination);
 
-    const lfo = audioCtx.createOscillator();
-    const lfoGain = audioCtx.createGain();
-    lfo.type = 'sine';
-    lfo.frequency.value = 0.08;
-    lfoGain.gain.value = 100;
+      // ── drone ──
+      const droneFilter = audioCtx.createBiquadFilter();
+      droneFilter.type = 'lowpass';
+      droneFilter.frequency.value = 400;
+      droneFilter.Q.value = 0.5;
 
-    const filter = audioCtx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 350;
-    filter.Q.value = 0.5;
-    lfo.connect(lfoGain);
-    lfoGain.connect(filter.frequency);
+      const lfo = audioCtx.createOscillator();
+      const lfoG = audioCtx.createGain();
+      lfo.type = 'sine'; lfo.frequency.value = 0.08;
+      lfoG.gain.value = 120;
+      lfo.connect(lfoG); lfoG.connect(droneFilter.frequency);
 
-    const oscs = [];
-    [55, 55.5, 82.41, 110].forEach(f => {
-      const o = audioCtx.createOscillator();
-      o.type = 'sine';
-      o.frequency.value = f;
-      o.connect(filter);
-      o.start();
-      oscs.push(o);
+      const drones = [];
+      [55, 55.3, 82.41, 110].forEach(function(f) {
+        var o = audioCtx.createOscillator();
+        o.type = 'sine'; o.frequency.value = f;
+        o.connect(droneFilter); o.start();
+        drones.push(o);
+      });
+      droneFilter.connect(master);
+      lfo.start();
+
+      // ── pad ──
+      var padGain = audioCtx.createGain();
+      padGain.gain.value = 0;
+      padGain.gain.linearRampToValueAtTime(0.08, audioCtx.currentTime + 3);
+      padGain.connect(master);
+      var padOsc = audioCtx.createOscillator();
+      padOsc.type = 'sawtooth'; padOsc.frequency.value = 55;
+      var padF = audioCtx.createBiquadFilter();
+      padF.type = 'lowpass'; padF.frequency.value = 150;
+      padOsc.connect(padF); padF.connect(padGain);
+      padOsc.start();
+
+      fallbackNodes = {
+        master: master, drones: drones, lfo: lfo, lfoG: lfoG,
+        droneFilter: droneFilter, padOsc: padOsc, padGain: padGain, padF: padF
+      };
+      scheduleChime();
     });
-    filter.connect(droneGain);
-    lfo.start();
-
-    const padGain = audioCtx.createGain();
-    padGain.gain.value = 0;
-    padGain.gain.linearRampToValueAtTime(0.06, now + 3);
-    padGain.connect(audioCtx.destination);
-    const padOsc = audioCtx.createOscillator();
-    padOsc.type = 'sawtooth';
-    padOsc.frequency.value = 55;
-    const padFilter = audioCtx.createBiquadFilter();
-    padFilter.type = 'lowpass';
-    padFilter.frequency.value = 150;
-    padOsc.connect(padFilter);
-    padFilter.connect(padGain);
-    padOsc.start();
-
-    droneNodes = { oscs, droneGain, filter, lfo, lfoGain, padOsc, padGain, padFilter };
-    scheduleChime();
   }
 
   function stopFallbackMusic() {
     isMusicPlaying = false;
     if (chimeTimer) { clearTimeout(chimeTimer); chimeTimer = null; }
-    if (droneNodes) {
-      droneNodes.oscs.forEach(o => o.stop());
-      droneNodes.lfo.stop();
-      if (droneNodes.padOsc) droneNodes.padOsc.stop();
-      droneNodes = null;
+    if (fallbackNodes) {
+      try {
+        fallbackNodes.master.gain.value = 0;
+        fallbackNodes.drones.forEach(function(o) { o.stop(); });
+        fallbackNodes.lfo.stop();
+        if (fallbackNodes.padOsc) fallbackNodes.padOsc.stop();
+      } catch(e) {}
+      fallbackNodes = null;
     }
   }
 
   function scheduleChime() {
     if (!isMusicPlaying || !useFallbackAudio) return;
-    chimeTimer = setTimeout(() => {
-      if (!audioCtx || !isMusicPlaying) return;
+    chimeTimer = setTimeout(function() {
+      if (!audioCtx || !isMusicPlaying || !useFallbackAudio) return;
       try {
-        const scale = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33];
-        const freq = scale[Math.floor(Math.random() * scale.length)];
-        const now = audioCtx.currentTime;
-        // 主音
-        const osc = audioCtx.createOscillator();
+        var scale = [220, 261.63, 293.66, 329.63, 392, 440, 523.25];
+        var freq = scale[Math.floor(Math.random() * scale.length)];
+        var now = audioCtx.currentTime;
+        var osc = audioCtx.createOscillator();
         osc.type = 'sine';
         osc.frequency.value = freq;
-        const gain = audioCtx.createGain();
-        gain.gain.setValueAtTime(0, now);
-        gain.gain.linearRampToValueAtTime(0.10, now + 0.10);
-        gain.gain.linearRampToValueAtTime(0.05, now + 0.6);
-        gain.gain.linearRampToValueAtTime(0, now + 2.5);
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
+        var g = audioCtx.createGain();
+        g.gain.setValueAtTime(0, now);
+        g.gain.linearRampToValueAtTime(0.15, now + 0.10);
+        g.gain.linearRampToValueAtTime(0.08, now + 0.6);
+        g.gain.linearRampToValueAtTime(0, now + 2.5);
+        osc.connect(g);
+        g.connect(audioCtx.destination);
         osc.start(now);
         osc.stop(now + 3);
-        // 偶尔加泛音
-        if (Math.random() < 0.35) {
-          const o2 = audioCtx.createOscillator();
+        if (Math.random() < 0.3) {
+          var o2 = audioCtx.createOscillator();
           o2.type = 'sine';
           o2.frequency.value = freq * (Math.random() < 0.5 ? 1.5 : 2);
-          const g2 = audioCtx.createGain();
+          var g2 = audioCtx.createGain();
           g2.gain.setValueAtTime(0, now);
-          g2.gain.linearRampToValueAtTime(0.04, now + 0.08);
+          g2.gain.linearRampToValueAtTime(0.05, now + 0.08);
           g2.gain.linearRampToValueAtTime(0, now + 1.2);
-          o2.connect(g2);
-          g2.connect(audioCtx.destination);
-          o2.start(now);
-          o2.stop(now + 2);
+          o2.connect(g2); g2.connect(audioCtx.destination);
+          o2.start(now); o2.stop(now + 2);
         }
-      } catch (e) {}
+      } catch(e) {}
       scheduleChime();
     }, 2500 + Math.random() * 4000);
   }
