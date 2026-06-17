@@ -228,8 +228,112 @@
   let currentTrackIdx = -1;
   let trackList = [];
   let playlistOpen = false;
+  let useFallbackAudio = false;   // 无服务器时使用 Web Audio API 生成
 
+  // ---- Web Audio API 回退 ----
+  let audioCtx = null;
+  let droneNodes = null;
+  let chimeTimer = null;
+
+  function initFallbackAudio() {
+    if (audioCtx) return;
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+
+  function startFallbackMusic() {
+    if (isMusicPlaying) return;
+    initFallbackAudio();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+    isMusicPlaying = true;
+
+    const now = audioCtx.currentTime;
+    const droneGain = audioCtx.createGain();
+    droneGain.gain.value = 0.04;
+    droneGain.connect(audioCtx.destination);
+
+    const lfo = audioCtx.createOscillator();
+    const lfoGain = audioCtx.createGain();
+    lfo.type = 'sine';
+    lfo.frequency.value = 0.1;
+    lfoGain.gain.value = 80;
+
+    const filter = audioCtx.createBiquadFilter();
+    filter.type = 'lowpass';
+    filter.frequency.value = 300;
+    filter.Q.value = 0.5;
+    lfo.connect(lfoGain);
+    lfoGain.connect(filter.frequency);
+
+    const oscs = [];
+    [55, 55.5, 82.41].forEach(f => {
+      const o = audioCtx.createOscillator();
+      o.type = 'sine';
+      o.frequency.value = f;
+      o.connect(filter);
+      o.start();
+      oscs.push(o);
+    });
+    filter.connect(droneGain);
+    lfo.start();
+
+    const padGain = audioCtx.createGain();
+    padGain.gain.value = 0;
+    padGain.gain.linearRampToValueAtTime(0.02, now + 3);
+    padGain.connect(audioCtx.destination);
+    const padOsc = audioCtx.createOscillator();
+    padOsc.type = 'sawtooth';
+    padOsc.frequency.value = 55;
+    const padFilter = audioCtx.createBiquadFilter();
+    padFilter.type = 'lowpass';
+    padFilter.frequency.value = 120;
+    padOsc.connect(padFilter);
+    padFilter.connect(padGain);
+    padOsc.start();
+
+    droneNodes = { oscs, droneGain, filter, lfo, lfoGain, padOsc, padGain, padFilter };
+    scheduleChime();
+  }
+
+  function stopFallbackMusic() {
+    isMusicPlaying = false;
+    if (chimeTimer) { clearTimeout(chimeTimer); chimeTimer = null; }
+    if (droneNodes) {
+      droneNodes.oscs.forEach(o => o.stop());
+      droneNodes.lfo.stop();
+      if (droneNodes.padOsc) droneNodes.padOsc.stop();
+      droneNodes = null;
+    }
+  }
+
+  function scheduleChime() {
+    if (!isMusicPlaying || !useFallbackAudio) return;
+    chimeTimer = setTimeout(() => {
+      if (!audioCtx || !isMusicPlaying) return;
+      const scale = [220, 261.63, 293.66, 329.63, 392, 440, 523.25];
+      const freq = scale[Math.floor(Math.random() * scale.length)];
+      const now = audioCtx.currentTime;
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(0.04, now + 0.12);
+      gain.gain.linearRampToValueAtTime(0.02, now + 0.8);
+      gain.gain.linearRampToValueAtTime(0, now + 2.8);
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      osc.start(now);
+      osc.stop(now + 3);
+      scheduleChime();
+    }, 3000 + Math.random() * 5000);
+  }
+
+  // ---- MP3 引擎 ----
   function updateNowPlaying() {
+    if (useFallbackAudio) {
+      nowPlaying.textContent = '♫  环境音';
+      return;
+    }
     if (currentTrackIdx >= 0 && currentTrackIdx < trackList.length) {
       const name = trackList[currentTrackIdx].replace(/\.mp3$/, '');
       nowPlaying.textContent = '♫  ' + name;
@@ -240,6 +344,13 @@
 
   function renderPlaylist() {
     playlistEl.innerHTML = '';
+    if (useFallbackAudio) {
+      const item = document.createElement('div');
+      item.className = 'playlist-item active';
+      item.textContent = '♫  环境音（离线模式）';
+      playlistEl.appendChild(item);
+      return;
+    }
     trackList.forEach((name, i) => {
       const item = document.createElement('div');
       item.className = 'playlist-item' + (i === currentTrackIdx ? ' active' : '');
@@ -269,6 +380,7 @@
   }
 
   function selectTrack(idx) {
+    if (useFallbackAudio) return;
     if (idx < 0 || idx >= trackList.length) return;
     currentTrackIdx = idx;
     if (!isMusicPlaying) {
@@ -281,7 +393,6 @@
     audioEl.src = src;
     audioEl.play().catch(() => {});
     updateNowPlaying();
-    // 高亮当前曲目
     document.querySelectorAll('.playlist-item').forEach((el, i) => {
       el.classList.toggle('active', i === idx);
     });
@@ -315,11 +426,22 @@
         trackList = list;
         renderPlaylist();
       })
-      .catch(() => {});
+      .catch(() => {
+        // 无服务器 → 启用回退音频
+        useFallbackAudio = true;
+        nowPlaying.textContent = '♫  环境音';
+        renderPlaylist();
+      });
   }
 
   function startMusic() {
     if (isMusicPlaying) return;
+    if (useFallbackAudio) {
+      startFallbackMusic();
+      nowPlaying.textContent = '♫  环境音';
+      musicBtn.textContent = '♫';
+      return;
+    }
     initAudio();
     isMusicPlaying = true;
     if (currentTrackIdx < 0 || currentTrackIdx >= trackList.length) {
@@ -333,7 +455,9 @@
 
   function stopMusic() {
     isMusicPlaying = false;
-    if (audioEl) {
+    if (useFallbackAudio) {
+      stopFallbackMusic();
+    } else if (audioEl) {
       audioEl.pause();
       audioEl.currentTime = 0;
     }
