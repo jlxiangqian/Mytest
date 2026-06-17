@@ -353,14 +353,23 @@
   }
 
   // ---- MP3 引擎 ----
+  function trackDisplayName(track) {
+    if (track.startsWith('http')) {
+      // 从 URL 提取名称
+      const parts = track.split('/');
+      const last = parts[parts.length - 1] || parts[parts.length - 2] || track;
+      return last.replace(/[-_]/g, ' ').replace(/\.mp3$/i, '').replace(/\b\w/g, c => c.toUpperCase());
+    }
+    return track.replace(/\.(mp3|webm|mp4|wav|ogg|flac|m4a)$/i, '');
+  }
+
   function updateNowPlaying() {
     if (useFallbackAudio) {
       nowPlaying.textContent = '♫  环境音';
       return;
     }
     if (currentTrackIdx >= 0 && currentTrackIdx < trackList.length) {
-      const name = trackList[currentTrackIdx].replace(/\.mp3$/, '');
-      nowPlaying.textContent = '♫  ' + name;
+      nowPlaying.textContent = '♫  ' + trackDisplayName(trackList[currentTrackIdx]);
     } else {
       nowPlaying.innerHTML = '<span class="sep">—</span> 未播放 <span class="sep">—</span>';
     }
@@ -375,10 +384,10 @@
       playlistEl.appendChild(item);
       return;
     }
-    trackList.forEach((name, i) => {
+    trackList.forEach((track, i) => {
       const item = document.createElement('div');
       item.className = 'playlist-item' + (i === currentTrackIdx ? ' active' : '');
-      item.textContent = name.replace(/\.mp3$/, '');
+      item.textContent = trackDisplayName(track);
       item.addEventListener('click', (e) => {
         e.stopPropagation();
         selectTrack(i);
@@ -412,7 +421,8 @@
       isMusicPlaying = true;
       musicBtn.textContent = '♫';
     }
-    const src = 'music/' + encodeURIComponent(trackList[idx]);
+    const track = trackList[idx];
+    const src = track.startsWith('http') ? track : 'music/' + encodeURIComponent(track);
     if (!audioEl) initAudio();
     audioEl.src = src;
     audioEl.play().catch(() => {});

@@ -16,6 +16,17 @@ DIR = pathlib.Path(__file__).parent
 MUSIC_DIR = DIR / "music"
 
 
+def read_url_tracks():
+    """读取 music/url.txt 中的远程音乐链接"""
+    urls = []
+    url_file = MUSIC_DIR / "url.txt"
+    if url_file.is_file():
+        for line in url_file.read_text("utf-8").strip().splitlines():
+            line = line.strip()
+            if line and not line.startswith("#"):
+                urls.append(line)
+    return urls
+
 class Handler(http.server.SimpleHTTPRequestHandler):
     def do_GET(self):
         parsed = urlparse(self.path)
@@ -25,8 +36,10 @@ class Handler(http.server.SimpleHTTPRequestHandler):
             tracks = []
             if MUSIC_DIR.is_dir():
                 for f in sorted(MUSIC_DIR.iterdir()):
-                    if f.suffix.lower() in (".mp3", ".wav", ".ogg", ".flac", ".m4a"):
+                    if f.suffix.lower() in (".mp3", ".wav", ".ogg", ".flac", ".m4a", ".webm", ".mp4"):
                         tracks.append(f.name)
+            # 追加远程 URL 曲目
+            tracks.extend(read_url_tracks())
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
