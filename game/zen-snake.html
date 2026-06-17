@@ -237,35 +237,46 @@
 
   function initFallbackAudio() {
     if (audioCtx) return;
-    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    } catch (e) {
+      console.warn('Web Audio API not supported');
+    }
   }
 
   function startFallbackMusic() {
     if (isMusicPlaying) return;
     initFallbackAudio();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
+    if (!audioCtx) {
+      hint.textContent = '浏览器不支持 Web Audio API';
+      return;
+    }
+    // 确保 AudioContext 处于运行状态
+    if (audioCtx.state === 'suspended') {
+      audioCtx.resume().catch(function(){});
+    }
     isMusicPlaying = true;
 
     const now = audioCtx.currentTime;
     const droneGain = audioCtx.createGain();
-    droneGain.gain.value = 0.04;
+    droneGain.gain.value = 0.12;
     droneGain.connect(audioCtx.destination);
 
     const lfo = audioCtx.createOscillator();
     const lfoGain = audioCtx.createGain();
     lfo.type = 'sine';
-    lfo.frequency.value = 0.1;
-    lfoGain.gain.value = 80;
+    lfo.frequency.value = 0.08;
+    lfoGain.gain.value = 100;
 
     const filter = audioCtx.createBiquadFilter();
     filter.type = 'lowpass';
-    filter.frequency.value = 300;
+    filter.frequency.value = 350;
     filter.Q.value = 0.5;
     lfo.connect(lfoGain);
     lfoGain.connect(filter.frequency);
 
     const oscs = [];
-    [55, 55.5, 82.41].forEach(f => {
+    [55, 55.5, 82.41, 110].forEach(f => {
       const o = audioCtx.createOscillator();
       o.type = 'sine';
       o.frequency.value = f;
@@ -278,14 +289,14 @@
 
     const padGain = audioCtx.createGain();
     padGain.gain.value = 0;
-    padGain.gain.linearRampToValueAtTime(0.02, now + 3);
+    padGain.gain.linearRampToValueAtTime(0.06, now + 3);
     padGain.connect(audioCtx.destination);
     const padOsc = audioCtx.createOscillator();
     padOsc.type = 'sawtooth';
     padOsc.frequency.value = 55;
     const padFilter = audioCtx.createBiquadFilter();
     padFilter.type = 'lowpass';
-    padFilter.frequency.value = 120;
+    padFilter.frequency.value = 150;
     padOsc.connect(padFilter);
     padFilter.connect(padGain);
     padOsc.start();
@@ -309,23 +320,40 @@
     if (!isMusicPlaying || !useFallbackAudio) return;
     chimeTimer = setTimeout(() => {
       if (!audioCtx || !isMusicPlaying) return;
-      const scale = [220, 261.63, 293.66, 329.63, 392, 440, 523.25];
-      const freq = scale[Math.floor(Math.random() * scale.length)];
-      const now = audioCtx.currentTime;
-      const osc = audioCtx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      const gain = audioCtx.createGain();
-      gain.gain.setValueAtTime(0, now);
-      gain.gain.linearRampToValueAtTime(0.04, now + 0.12);
-      gain.gain.linearRampToValueAtTime(0.02, now + 0.8);
-      gain.gain.linearRampToValueAtTime(0, now + 2.8);
-      osc.connect(gain);
-      gain.connect(audioCtx.destination);
-      osc.start(now);
-      osc.stop(now + 3);
+      try {
+        const scale = [220, 261.63, 293.66, 329.63, 392, 440, 523.25, 587.33];
+        const freq = scale[Math.floor(Math.random() * scale.length)];
+        const now = audioCtx.currentTime;
+        // 主音
+        const osc = audioCtx.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+        const gain = audioCtx.createGain();
+        gain.gain.setValueAtTime(0, now);
+        gain.gain.linearRampToValueAtTime(0.10, now + 0.10);
+        gain.gain.linearRampToValueAtTime(0.05, now + 0.6);
+        gain.gain.linearRampToValueAtTime(0, now + 2.5);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start(now);
+        osc.stop(now + 3);
+        // 偶尔加泛音
+        if (Math.random() < 0.35) {
+          const o2 = audioCtx.createOscillator();
+          o2.type = 'sine';
+          o2.frequency.value = freq * (Math.random() < 0.5 ? 1.5 : 2);
+          const g2 = audioCtx.createGain();
+          g2.gain.setValueAtTime(0, now);
+          g2.gain.linearRampToValueAtTime(0.04, now + 0.08);
+          g2.gain.linearRampToValueAtTime(0, now + 1.2);
+          o2.connect(g2);
+          g2.connect(audioCtx.destination);
+          o2.start(now);
+          o2.stop(now + 2);
+        }
+      } catch (e) {}
       scheduleChime();
-    }, 3000 + Math.random() * 5000);
+    }, 2500 + Math.random() * 4000);
   }
 
   // ---- MP3 引擎 ----
@@ -440,6 +468,7 @@
       startFallbackMusic();
       nowPlaying.textContent = '♫  环境音';
       musicBtn.textContent = '♫';
+      hint.textContent = '自动生成中 · Drone + 风铃';
       return;
     }
     initAudio();
@@ -457,6 +486,7 @@
     isMusicPlaying = false;
     if (useFallbackAudio) {
       stopFallbackMusic();
+      hint.textContent = '方向键移动 · 穿墙 · 穿过自己会缩短';
     } else if (audioEl) {
       audioEl.pause();
       audioEl.currentTime = 0;
